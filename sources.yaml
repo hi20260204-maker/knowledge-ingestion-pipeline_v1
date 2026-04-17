@@ -1,13 +1,100 @@
 sources:
+  # 1. 실시간 시그널 & 여론 (Sensing)
+  - id: "reddit_ml"
+    category: "Sensing"
+    url: "https://www.reddit.com/r/MachineLearning"
+    priority: 4
+  - id: "reddit_programming"
+    category: "Sensing"
+    url: "https://www.reddit.com/r/programming"
+    priority: 4
+  - id: "reddit_localllama"
+    category: "Sensing"
+    url: "https://www.reddit.com/r/LocalLLaMA"
+    priority: 5
   - id: "hacker_news"
-    category: "Community"
+    category: "Sensing"
     url: "https://news.ycombinator.com"
     priority: 5
+
+  # 2. 정제된 뉴스 및 요약 (Filtering)
+  - id: "techmeme"
+    category: "Filtering"
+    url: "https://www.techmeme.com"
+    priority: 5
+  - id: "tldr_tech"
+    category: "Filtering"
+    url: "https://tldr.tech"
+    priority: 5
   - id: "techcrunch"
-    category: "News"
+    category: "Filtering"
     url: "https://techcrunch.com"
     priority: 4
+  - id: "the_verge"
+    category: "Filtering"
+    url: "https://www.theverge.com"
+    priority: 3
+  - id: "infoq"
+    category: "Filtering"
+    url: "https://www.infoq.com"
+    priority: 4
+
+  # 3. 실무 딥다이브 & 아키텍처 (Deep Dive)
+  - id: "bytebytego"
+    category: "Deep Dive"
+    url: "https://blog.bytebytego.com"
+    priority: 5
+  - id: "pragmatic_engineer"
+    category: "Deep Dive"
+    url: "https://www.pragmaticengineer.com"
+    priority: 5
+  - id: "latent_space"
+    category: "Deep Dive"
+    url: "https://www.latent.space"
+    priority: 5
+  - id: "towards_datascience"
+    category: "Deep Dive"
+    url: "https://towardsdatascience.com"
+    priority: 4
+
+  # 4. 공식 기술 소스 (The Source)
+  - id: "openai_blog"
+    category: "Official"
+    url: "https://developers.openai.com/blog"
+    priority: 5
+  - id: "anthropic_news"
+    category: "Official"
+    url: "https://www.anthropic.com/news"
+    priority: 5
+  - id: "meta_ai_blog"
+    category: "Official"
+    url: "https://ai.meta.com/blog"
+    priority: 5
+  - id: "google_research"
+    category: "Official"
+    url: "https://blog.research.google"
+    priority: 5
+  - id: "nvidia_blog"
+    category: "Official"
+    url: "https://developer.nvidia.com/blog"
+    priority: 5
+
+  # 5. 릴리스 / 변경사항 추적 (Release)
   - id: "github_changelog"
-    category: "Engineering"
+    category: "Release"
     url: "https://github.blog/changelog/"
     priority: 5
+  - id: "github_roadmap"
+    category: "Release"
+    url: "https://github.com/github/roadmap"
+    priority: 4
+
+  # 6. 언어 / 프레임워크 전용 업데이트 (Specialized)
+  - id: "python_weekly"
+    category: "Specialized"
+    url: "https://www.pythonweekly.com"
+    priority: 4
+  - id: "react_status"
+    category: "Specialized"
+    url: "https://react.statuscode.com"
+    priority: 4
