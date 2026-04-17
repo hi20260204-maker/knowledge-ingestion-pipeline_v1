@@ -1,7 +1,6 @@
 import os
 import sys
 import logging
-from datetime import datetime
 from typing import List
 
 # Ensure src is in python path
@@ -12,6 +11,7 @@ from src.extractor.fallback_engine import perform_extraction, engine_rss_fallbac
 from src.processor.hasher import generate_url_hash, generate_content_hash
 from src.llm.summarizer import summarize_content
 from src.distribution.discord_notifier import send_discord_notification
+from src.distribution.reporter import generate_markdown_archive
 from src.db.client import init_db, check_duplicate, save_article, save_summary
 from src.utils.logger import get_logger
 
@@ -19,25 +19,6 @@ logger = get_logger(__name__)
 
 DB_PATH = "knowledge.db"
 SCHEMA_PATH = os.path.join("src", "db", "schema.sql")
-DOCS_DIR = "docs"
-
-def generate_markdown_archive(articles_summaries: List[dict]):
-    """Generate a daily archive markdown file in the docs directory."""
-    if not os.path.exists(DOCS_DIR):
-        os.makedirs(DOCS_DIR)
-        
-    date_str = datetime.now().strftime("%Y-%m-%d")
-    file_path = os.path.join(DOCS_DIR, f"report_{date_str}.md")
-    
-    with open(file_path, "a", encoding="utf-8") as f:
-        if os.path.getsize(file_path) == 0 if os.path.exists(file_path) else True:
-            f.write(f"# IT Knowledge Ingestion Report - {date_str}\n\n")
-        
-        for item in articles_summaries:
-            f.write(f"## {item['title']}\n")
-            f.write(f"- **URL:** {item['url']}\n")
-            f.write(f"- **Score:** {item['score']}/10\n")
-            f.write(f"- **Summary:** {item['summary']}\n\n")
 
 def run_pipeline():
     # 1. Initialize DB
@@ -76,15 +57,16 @@ def run_pipeline():
         except Exception as e:
             logger.error(f"Summarization failed for {source.url}: {str(e)}")
             if not os.environ.get("OPENAI_API_KEY"):
-              logger.warning("Bypassing LLM due to missing API key")
-              summary_response = type('obj', (object,), {
-                  'importance_score': 5,
-                  'summary': "Summary bypass (No API Key provided)",
-                  'key_points': ["Point 1", "Point 2"],
-                  'keywords': ["#Test", "#Manual"]
-              })
+                logger.warning("Bypassing LLM due to missing API key")
+                # Dummy response for testing
+                summary_response = type('obj', (object,), {
+                    'importance_score': 5,
+                    'summary': "Summary bypass (No API Key provided)",
+                    'key_points': ["Point 1", "Point 2"],
+                    'keywords': ["#Test", "#Manual"]
+                })
             else:
-              continue
+                continue
 
         # 7. Save to DB
         article_data = {
@@ -133,7 +115,6 @@ def run_pipeline():
     # 9. Generate Archives
     if processed_items:
         generate_markdown_archive(processed_items)
-        logger.info(f"Archived {len(processed_items)} items to {DOCS_DIR}")
 
     logger.info("Pipeline execution completed.")
 
