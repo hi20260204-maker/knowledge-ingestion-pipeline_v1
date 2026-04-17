@@ -1,0 +1,5 @@
+sources:
+  - id: "tech_blog_1"
+    category: "AI"
+    url: "https://example.com/rss"
+    priority: 5
