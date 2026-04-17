@@ -1,6 +1,7 @@
 import os
 import sys
 import logging
+from datetime import datetime
 from typing import List
 
 # Ensure src is in python path
@@ -18,6 +19,25 @@ logger = get_logger(__name__)
 
 DB_PATH = "knowledge.db"
 SCHEMA_PATH = os.path.join("src", "db", "schema.sql")
+DOCS_DIR = "docs"
+
+def generate_markdown_archive(articles_summaries: List[dict]):
+    """Generate a daily archive markdown file in the docs directory."""
+    if not os.path.exists(DOCS_DIR):
+        os.makedirs(DOCS_DIR)
+        
+    date_str = datetime.now().strftime("%Y-%m-%d")
+    file_path = os.path.join(DOCS_DIR, f"report_{date_str}.md")
+    
+    with open(file_path, "a", encoding="utf-8") as f:
+        if os.path.getsize(file_path) == 0 if os.path.exists(file_path) else True:
+            f.write(f"# IT Knowledge Ingestion Report - {date_str}\n\n")
+        
+        for item in articles_summaries:
+            f.write(f"## {item['title']}\n")
+            f.write(f"- **URL:** {item['url']}\n")
+            f.write(f"- **Score:** {item['score']}/10\n")
+            f.write(f"- **Summary:** {item['summary']}\n\n")
 
 def run_pipeline():
     # 1. Initialize DB
@@ -29,12 +49,13 @@ def run_pipeline():
     sources = load_sources("sources.yaml")
     logger.info(f"Loaded {len(sources)} sources from configuration.")
     
+    processed_items = []
+
     # 3. Process Each Source
     for source in sources:
         logger.info(f"Processing source: {source.id} ({source.url})")
         
         # 4. Extraction
-        # We only use RSS fallback for this test implementation
         extraction_result = perform_extraction(source.url, [engine_rss_fallback])
         
         if not extraction_result.success:
@@ -54,7 +75,6 @@ def run_pipeline():
             summary_response = summarize_content(extraction_result.content)
         except Exception as e:
             logger.error(f"Summarization failed for {source.url}: {str(e)}")
-            # Fallback to a dummy summary if LLM fails (for testing)
             if not os.environ.get("OPENAI_API_KEY"):
               logger.warning("Bypassing LLM due to missing API key")
               summary_response = type('obj', (object,), {
@@ -88,6 +108,14 @@ def run_pipeline():
         
         save_summary(DB_PATH, article_id, summary_data)
         
+        # Collect for archiving
+        processed_items.append({
+            'title': article_data['title'],
+            'url': article_data['raw_url'],
+            'score': summary_data['importance_score'],
+            'summary': summary_data['summary']
+        })
+
         # 8. Discord Notification
         webhook_url = os.environ.get("DISCORD_WEBHOOK_URL")
         if webhook_url:
@@ -102,7 +130,15 @@ def run_pipeline():
         else:
             logger.warning("DISCORD_WEBHOOK_URL not set. Skipping notification.")
 
+    # 9. Generate Archives
+    if processed_items:
+        generate_markdown_archive(processed_items)
+        logger.info(f"Archived {len(processed_items)} items to {DOCS_DIR}")
+
     logger.info("Pipeline execution completed.")
+
+if __name__ == "__main__":
+    run_pipeline()
 
 if __name__ == "__main__":
     run_pipeline()

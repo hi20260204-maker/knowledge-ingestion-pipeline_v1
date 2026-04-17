@@ -1,5 +1,13 @@
 sources:
-  - id: "tech_blog_1"
-    category: "AI"
-    url: "https://example.com/rss"
+  - id: "hacker_news"
+    category: "Community"
+    url: "https://news.ycombinator.com"
+    priority: 5
+  - id: "techcrunch"
+    category: "News"
+    url: "https://techcrunch.com"
+    priority: 4
+  - id: "github_changelog"
+    category: "Engineering"
+    url: "https://github.blog/changelog/"
     priority: 5

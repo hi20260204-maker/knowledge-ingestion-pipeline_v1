@@ -32,14 +32,14 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: |
-          # Dummy entry command. Change path mapping as pipeline completes.
-          # python src/pipeline/main_pipeline.py
-          echo "Pipeline Execution Simulated."
+          python src/pipeline/main_pipeline.py
           
       - name: Commit and Push DB & Markdown Archives
         run: |
           git config --global user.name 'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
-          git add docs/ src/db/
-          git commit -m "chore: auto-update daily ingest DB & markdown archives" || exit 0
-          git push
+          # Force create docs if it doesn't exist to prevent git error, though pipeline handles it
+          mkdir -p docs
+          git add docs/ knowledge.db
+          git commit -m "chore: auto-update daily ingest DB & markdown archives" || echo "No changes to commit"
+          git push || echo "No changes to push"
