@@ -31,7 +31,7 @@ def summarize_content(clean_content: str, api_key: str = None) -> LLMSummaryResp
         completion = client.beta.chat.completions.parse(
             model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": "You are a senior tech lead. Analyze the IT news and output a JSON response containing an importance score (1-10), a 3 sentence summary, key points, and keywords. Stick strictly to the facts."},
+                {"role": "system", "content": "You are a senior tech lead. Analyze the IT news and output a JSON response. The summary, key_points, and keywords MUST be written in Korean. Stick strictly to the facts and maintain technical accuracy."},
                 {"role": "user", "content": f"Summarize this:\n\n{clean_content}"}
             ],
             response_format=LLMSummaryResponse,
