@@ -1,0 +1,7 @@
+pytest>=7.0.0
+crawl4ai
+firecrawl-py
+openai
+pyyaml
+pydantic
+requests
