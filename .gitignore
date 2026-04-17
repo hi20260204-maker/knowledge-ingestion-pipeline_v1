@@ -1,0 +1,31 @@
+# Virtual Environments
+venv/
+env/
+.venv/
+.env
+
+# Python Cache & Bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# IDE & Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Logs
+logs/
+*.log
+
+# DOC
+DOC/
+
+# 🚨 IMPORTANT DB EXCEPTION 🚨
+# 이 프로젝트는 SQLite DB를 GitHub 레포지토리에 커밋하여 영구 저장소로 활용합니다.
+# 따라서 src/db/ 폴더 내부의 테스트/프로덕션 DB 파일들은 무시하지 않습니다.
+# 만약 개별 로컬 테스트용 DB를 별도로 만들 경우에만 아래에 명시하세요.
+# local_test.db
