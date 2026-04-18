@@ -9,16 +9,22 @@ CREATE TABLE IF NOT EXISTS articles (
     content_hash TEXT,
     published_at DATETIME,
     raw_content TEXT,
-    clean_content TEXT
+    clean_content TEXT,
+    status TEXT DEFAULT 'NEW',
+    parent_id INTEGER,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(parent_id) REFERENCES articles(id)
 );
 
 CREATE TABLE IF NOT EXISTS summaries (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     article_id INTEGER,
     importance_score INTEGER,
+    importance_reason TEXT,
     summary_text TEXT,
     key_points TEXT,
     keywords TEXT,
+    summary_version INTEGER DEFAULT 1,
     created_at DATETIME,
     FOREIGN KEY(article_id) REFERENCES articles(id)
 );

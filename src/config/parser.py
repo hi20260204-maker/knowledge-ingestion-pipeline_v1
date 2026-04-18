@@ -7,6 +7,7 @@ class SourceConfig(BaseModel):
     category: str
     url: str
     priority: int = 1
+    source_weight: float = 0.0
 
 def load_sources(file_path: str) -> List[SourceConfig]:
     with open(file_path, 'r', encoding='utf-8') as f:

@@ -16,6 +16,7 @@ sources:
     category: "Sensing"
     url: "https://news.ycombinator.com"
     priority: 5
+    source_weight: 0.2
 
   # 2. 정제된 뉴스 및 요약 (Filtering)
   - id: "techmeme"
@@ -26,10 +27,12 @@ sources:
     category: "Filtering"
     url: "https://tldr.tech"
     priority: 5
+    source_weight: 0.5
   - id: "techcrunch"
     category: "Filtering"
     url: "https://techcrunch.com"
     priority: 4
+    source_weight: 0.5
   - id: "the_verge"
     category: "Filtering"
     url: "https://www.theverge.com"
@@ -44,6 +47,7 @@ sources:
     category: "Deep Dive"
     url: "https://blog.bytebytego.com"
     priority: 5
+    source_weight: 0.8
   - id: "pragmatic_engineer"
     category: "Deep Dive"
     url: "https://www.pragmaticengineer.com"
@@ -62,6 +66,7 @@ sources:
     category: "Official"
     url: "https://developers.openai.com/blog"
     priority: 5
+    source_weight: 1.0
   - id: "anthropic_news"
     category: "Official"
     url: "https://www.anthropic.com/news"
@@ -70,10 +75,12 @@ sources:
     category: "Official"
     url: "https://ai.meta.com/blog"
     priority: 5
+    source_weight: 1.0
   - id: "google_research"
     category: "Official"
     url: "https://blog.research.google"
     priority: 5
+    source_weight: 1.0
   - id: "nvidia_blog"
     category: "Official"
     url: "https://developer.nvidia.com/blog"

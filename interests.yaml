@@ -1,0 +1,14 @@
+interests:
+  high:
+    - LLM
+    - AI Agent
+    - Python
+    - Data Pipeline
+  medium:
+    - Deep Learning
+    - MLOps
+    - Rust
+  low:
+    - Web Dev
+    - Frontend
+    - Cloud Native

@@ -5,3 +5,5 @@ openai
 pyyaml
 pydantic
 requests
+feedparser
+beautifulsoup4
