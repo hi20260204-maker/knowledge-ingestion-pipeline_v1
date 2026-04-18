@@ -154,9 +154,19 @@ def get_daily_summary(db_path, date_str):
     items = []
     for row in rows:
         item = dict(row)
-        # Handle potential None values for JSON fields
-        item['key_points'] = json.loads(item['key_points']) if item.get('key_points') else []
-        item['keywords'] = json.loads(item['keywords']) if item.get('keywords') else []
+        # Robust JSON parsing for Phase 4
+        try:
+            item['key_points'] = json.loads(item['key_points']) if item.get('key_points') else []
+        except (json.JSONDecodeError, TypeError):
+            logger.warning(f"Invalid key_points format for article {item.get('id')}. Falling back to [].")
+            item['key_points'] = []
+
+        try:
+            item['keywords'] = json.loads(item['keywords']) if item.get('keywords') else []
+        except (json.JSONDecodeError, TypeError):
+            logger.warning(f"Invalid keywords format for article {item.get('id')}. Falling back to [].")
+            item['keywords'] = []
+
         # Support legacy 'url' field for distribution layers
         item['url'] = item.get('raw_url', item.get('canonical_url'))
         items.append(item)

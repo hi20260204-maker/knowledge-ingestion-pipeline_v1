@@ -2,7 +2,7 @@ CREATE TABLE IF NOT EXISTS articles (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     source_id TEXT,
     raw_url TEXT,
-    canonical_url TEXT,
+    canonical_url TEXT UNIQUE,
     display_url TEXT,
     title TEXT,
     url_hash TEXT,
@@ -18,7 +18,7 @@ CREATE TABLE IF NOT EXISTS articles (
 
 CREATE TABLE IF NOT EXISTS summaries (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    article_id INTEGER,
+    article_id INTEGER UNIQUE,
     importance_score INTEGER,
     global_score REAL,
     personalized_score REAL,
