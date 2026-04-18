@@ -24,65 +24,68 @@ class Scorer:
 
     def calculate_score(self, signals: Dict[str, Any], metadata: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Calculates importance_score and generates importance_reason.
-        
-        signals: {topics: List[str], tags: List[str], confidence_score: float}
-        metadata: {source_weight: float, fetch_mode: str}
+        Calculates global_score (tech significance) and personalized_score (interest re-ranking).
+        Returns scores in 0-100 range.
         """
-        base_score = 3.0 # Default base
-        keyword_score = 0.0
-        reasons = []
+        # --- 1. Calculate Global Score (G) ---
+        g_base = 30.0
+        g_tag_bonus = 0.0
+        tags = [t.lower() for t in signals.get("tags", [])]
+        if "architecture" in tags or "research" in tags: g_tag_bonus += 30.0
+        elif "release" in tags or "news" in tags: g_tag_bonus += 15.0
+        elif "tooling" in tags: g_tag_bonus += 10.0
         
-        # 1. Keyword Weighting (Interests)
+        g_source_bonus = min(20.0, metadata.get("source_weight", 0.0) * 2) # Scaling source weight to 20 max
+        g_fetch_bonus = 20.0 if metadata.get("fetch_mode") == "full" else 0.0
+        
+        global_score = min(100.0, g_base + g_tag_bonus + g_source_bonus + g_fetch_bonus)
+        
+        # --- 2. Calculate Personalized Score (P) ---
+        # Personalization acts as a 60% weight re-ranker
+        interest_match_score = 0.0
+        matched_interests = []
         interests = self.interests.get("interests", {})
         detected_topics = [t.lower() for t in signals.get("topics", [])]
         
-        # Check High
         for kw in interests.get("high", []):
             if kw.lower() in detected_topics:
-                keyword_score += 3.0
-                reasons.append(f"주요 관심사({kw})")
-                
-        # Check Medium
-        for kw in interests.get("medium", []):
-            if kw.lower() in detected_topics:
-                keyword_score += 1.5
-                reasons.append(f"관심 기술({kw})")
-                
-        # 2. Confidence Correction (Suppression)
-        # Low confidence shrinks the keyword score boost
-        confidence = signals.get("confidence_score", 0.8)
-        adjusted_keyword_score = keyword_score * (0.5 + 0.5 * confidence)
+                interest_match_score += 100.0 # Intentional strong signal
+                matched_interests.append(kw)
+                break # Take highest match
         
-        # 3. Source & Metadata Bonuses
-        source_bonus = metadata.get("source_weight", 0.0)
-        if source_bonus > 0:
-            reasons.append("신뢰 소스 가산점")
-            
-        fetch_bonus = 0.5 if metadata.get("fetch_mode") == "full" else 0.0
-        if fetch_bonus > 0:
-            reasons.append("본문 분석 완료")
-            
-        # Tag bonuses
-        tag_bonus = 0.0
-        tags = [t.lower() for t in signals.get("tags", [])]
-        if "release" in tags or "news" in tags:
-            tag_bonus += 0.5
-            reasons.append("신규 릴리즈/소식")
-        if "architecture" in tags or "research" in tags:
-            tag_bonus += 0.8
-            reasons.append("기술적 중요도")
+        if not matched_interests:
+            for kw in interests.get("medium", []):
+                if kw.lower() in detected_topics:
+                    interest_match_score += 70.0
+                    matched_interests.append(kw)
+                    break
+        
+        if not matched_interests:
+            for kw in interests.get("low", []):
+                if kw.lower() in detected_topics:
+                    interest_match_score += 40.0
+                    matched_interests.append(kw)
+                    break
 
-        # Result Calculation
-        final_score = base_score + adjusted_keyword_score + source_bonus + fetch_bonus + tag_bonus
+        # Blend: 40% Global + 60% Personal Match
+        personalized_score = (global_score * 0.4) + (interest_match_score * 0.6)
+        personalized_score = min(100.0, personalized_score)
+
+        # --- 3. Generate Unified Reason ---
+        reasons = []
+        if g_tag_bonus >= 25: reasons.append("기술적 중요도 높음")
+        elif "release" in tags: reasons.append("신규 릴리즈")
         
-        # Clamp score to 1-10
-        final_score = max(1, min(10, round(final_score)))
+        if matched_interests:
+            reasons.append(f"관심사({matched_interests[0]}) 매칭")
         
-        # Generate reason string
+        if metadata.get("source_weight", 0.0) > 5:
+            reasons.append("신뢰 소스 가산")
+
         reason_str = " + ".join(reasons) if reasons else "일반 기술 소식"
         
         return {
-            "importance_score": final_score,
-            "importance_reason": reason_str
+            "global_score": round(global_score, 1),
+            "personalized_score": round(personalized_score, 1),
+            "reason": reason_str
         }

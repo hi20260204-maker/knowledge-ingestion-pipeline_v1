@@ -91,55 +91,76 @@ def save_article(db_path: str, article_data: Dict[str, Any]) -> int:
     conn.close()
     return article_id
 
-def save_summary(db_path: str, article_id: int, summary_data: Dict[str, Any], version: int = CURRENT_SUMMARY_VERSION):
-    """Save LLM summary results linked to an article with versioning."""
+def save_summary(db_path, article_id, summary_data):
+    """
+    Saves or updates intelligence data for an article.
+    Updated for Phase 4: Supports global_score, personalized_score, and unified reason.
+    """
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
     
+    # Unified 'reason' from Phase 4
+    reason = summary_data.get('reason', summary_data.get('importance_reason', '일반 기술 소식'))
+    g_score = summary_data.get('global_score', summary_data.get('importance_score', 50.0))
+    p_score = summary_data.get('personalized_score', g_score)
+
     cursor.execute("""
-        INSERT INTO summaries (article_id, importance_score, importance_reason, summary_text, key_points, keywords, summary_version, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO summaries (
+            article_id, summary, key_points, keywords, 
+            importance_score, global_score, personalized_score, reason
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(article_id) DO UPDATE SET
+            summary=excluded.summary,
+            key_points=excluded.key_points,
+            keywords=excluded.keywords,
+            importance_score=excluded.importance_score,
+            global_score=excluded.global_score,
+            personalized_score=excluded.personalized_score,
+            reason=excluded.reason
     """, (
-        article_id, summary_data['importance_score'], summary_data.get('importance_reason'),
-        summary_data['summary'], ", ".join(summary_data['key_points']), 
-        ", ".join(summary_data['keywords']), version, datetime.now().isoformat()
+        article_id, 
+        summary_data['summary'], 
+        json.dumps(summary_data['key_points']), 
+        json.dumps(summary_data['keywords']),
+        int(round(g_score/10.0)) if g_score > 10 else int(g_score), # Backward compatibility for old 1-10 range
+        g_score,
+        p_score,
+        reason
     ))
     
     conn.commit()
     conn.close()
 
-def get_daily_summary(db_path: str, date_str: str, version: int = CURRENT_SUMMARY_VERSION) -> List[Dict[str, Any]]:
+def get_daily_summary(db_path, date_str):
     """
-    Get the latest snapshot for a specific date.
-    - One record per canonical_url (latest updated_at)
-    - Valid summary with matching version
-    - Specific statuses only
+    Retrieves all articles and their intelligence data for a specific day.
+    Updated for Phase 4: Returns global_score, personalized_score, and unified reason.
     """
     conn = sqlite3.connect(db_path)
-    # Allows accessing rows by column name
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     
-    # Use MAX(id) as the ultimate tie-breaker for latest record per canonical_url
-    query = """
-        SELECT a.id, a.canonical_url, a.title, a.content_hash, a.status, a.raw_url as url,
-               s.importance_score as score, s.importance_reason as reason, s.summary_text as summary, s.key_points, s.keywords
+    cursor.execute("""
+        SELECT a.*, s.summary, s.key_points, s.keywords, 
+               s.global_score, s.personalized_score, s.reason
         FROM articles a
-        JOIN (
-            SELECT canonical_url, MAX(id) as latest_id
-            FROM articles
-            WHERE date(updated_at) = ?
-            AND status IN ('NEW', 'UPDATED', 'SUMMARY_REUSED')
-            GROUP BY canonical_url
-        ) latest ON a.id = latest.latest_id
         JOIN summaries s ON a.id = s.article_id
-        WHERE s.summary_version = ?
-        ORDER BY s.importance_score DESC
-    """
+        WHERE DATE(a.updated_at) = ?
+        AND a.status IN ('NEW', 'UPDATED', 'SUMMARY_REUSED')
+    """, (date_str,))
     
-    cursor.execute(query, (date_str, version))
     rows = cursor.fetchall()
-    
+    items = []
+    for row in rows:
+        item = dict(row)
+        # Handle potential None values for JSON fields
+        item['key_points'] = json.loads(item['key_points']) if item.get('key_points') else []
+        item['keywords'] = json.loads(item['keywords']) if item.get('keywords') else []
+        # Support legacy 'url' field for distribution layers
+        item['url'] = item.get('raw_url', item.get('canonical_url'))
+        items.append(item)
+        
+    conn.close()
     results = []
     for row in rows:
         item = dict(row)

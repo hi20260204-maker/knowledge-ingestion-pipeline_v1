@@ -169,22 +169,27 @@ def run_pipeline():
                             scoring_result = scorer.calculate_score(llm_signals.dict(), metadata)
                             
                             summary_data = {
-                                'importance_score': scoring_result['importance_score'],
-                                'importance_reason': scoring_result['importance_reason'],
+                                'global_score': scoring_result['global_score'],
+                                'personalized_score': scoring_result['personalized_score'],
+                                'reason': scoring_result['reason'],
                                 'summary': llm_signals.summary,
                                 'key_points': llm_signals.key_points,
-                                'keywords': llm_signals.topics # Mapping topics to keywords for legacy DB support
+                                'keywords': llm_signals.topics # Mapping topics to keywords for DB
                             }
                         except Exception as e:
                             logger.error(f"Summarization/Scoring failed for {item.url}: {e}")
                             summary_data = {
-                                'importance_score': 5,
-                                'importance_reason': "Analysis error fallback",
-                                'summary': "Summary bypass (No API Key or Error)",
-                                'key_points': [], 'keywords': []
+                                'global_score': 50.0,
+                                'personalized_score': 50.0,
+                                'reason': "Analysis error fallback",
+                                'summary': "Summary bypass (Error or API issue)",
+                                'key_points': [], 'keywords': ["General"]
                             }
-                    metrics['reused_summary'] += 1 if find_reusable_summary(DB_PATH, content_hash) else 0
-                    save_summary(DB_PATH, article_id, summary_data)
+                        
+                        save_summary(DB_PATH, article_id, summary_data)
+                        metrics['stored_new' if status == "NEW" else 'stored_updated'] += 1
+                    else:
+                        metrics['reused_summary'] += 1
                     
             except Exception as e:
                 logger.error(f"Error processing item {item.url}: {e}")
@@ -207,28 +212,32 @@ def run_pipeline():
     from datetime import datetime
     from src.db.client import get_daily_summary
     
-    today_str = datetime.now().strftime("%Y-%m-%d")
-    logger.info(f"Generating consolidated daily report for: {today_str}")
+    # 10. Trigger Distribution (Phase 4: Multi-dimensional curation)
+    from src.processor.aggregator import aggregate_items
+    from src.distribution.reporter import generate_markdown_archive
+    from datetime import datetime
+    from src.db.client import get_daily_summary
     
-    # Query the database for the definitive unique set of today's successes
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    logger.info(f"Generating high-intelligence report for: {today_str}")
+    
+    # Query the definitive unique set of today's items (with all Phase 4 scores)
     latest_daily_items = get_daily_summary(DB_PATH, today_str)
     
     if latest_daily_items:
-        # Group similar items by content_hash (Still useful for multi-source content)
+        # Group similar items & Create Markdown (Topic-grouped)
         grouped_items = aggregate_items(latest_daily_items)
         generate_markdown_archive(grouped_items, metrics)
         
-        # 11. Discord Notification (Phase 3 Final Verification)
+        # 11. Discord Notification (Phase 4 Final: G1 + P2 selection)
         from src.distribution.discord_notifier import send_daily_digest
         webhook_url = os.environ.get("DISCORD_WEBHOOK_URL")
         if webhook_url:
-            logger.info("Sending Daily Digest to Discord...")
+            logger.info("Sending Intelligent Daily Digest to Discord...")
             send_daily_digest(webhook_url, today_str, latest_daily_items, metrics)
     elif metrics['fetched'] > 0:
-        # Zero-data reporting (Passing metrics even when 0 items, to show status)
+        # Zero-data reporting
         generate_markdown_archive([], metrics)
-        
-        # Send a minimal notification to show pipeline is alive
         from src.distribution.discord_notifier import send_daily_digest
         webhook_url = os.environ.get("DISCORD_WEBHOOK_URL")
         if webhook_url:

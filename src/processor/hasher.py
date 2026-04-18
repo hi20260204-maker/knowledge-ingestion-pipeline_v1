@@ -5,55 +5,64 @@ from urllib.parse import urlparse, urlencode, parse_qs, urlunparse
 def normalize_url(url: str) -> str:
     """
     도메인별 특화 규칙을 포함한 URL 표준화 작업을 수행합니다.
-    트래킹 쿼리 파라미터(utm_*, ref 등)를 제거합니다.
+    트래킹 쿼리 파라미터 제외, Trailing Slash 제거, 프로토콜 통일 등을 처리합니다.
     """
-    parsed = urlparse(url)
-    query_params = parse_qs(parsed.query)
+    if not url: return ""
     
-    # 1. 공통 트래킹 파라미터 제거
-    tracking_params = {'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 'ref', 'source', 'fbclid'}
+    # 1. 프로토콜 및 도메인 정규화 (Lowercasing domain, removing trailing slash)
+    url = url.strip().rstrip('/')
+    parsed = urlparse(url)
+    
+    # 2. 쿼리 파라미터 정제
+    query_params = parse_qs(parsed.query)
+    tracking_params = {'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 'ref', 'source', 'fbclid', 'rss_id'}
     query_params = {k: v for k, v in query_params.items() if k.lower() not in tracking_params and not k.startswith('utm_')}
     
-    # 2. 도메인별 특화 규칙 (확장 가능한 구조)
-    if 'reddit.com' in parsed.netloc:
-        query_params = {} # Reddit index pages usually don't need query params for hashing
-    elif 'news.ycombinator.com' in parsed.netloc:
-        # Keep 'id' for items, but main page has no query
-        if 'id' not in query_params:
-            query_params = {}
+    # 3. 도메인별 특화 규칙
+    netloc = parsed.netloc.lower()
+    if 'reddit.com' in netloc:
+        query_params = {}
+    elif 'news.ycombinator.com' in netloc:
+        if 'id' not in query_params: query_params = {}
             
     clean_query = urlencode(query_params, doseq=True)
-    canonical_url = urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, clean_query, ''))
+    
+    # Fragment 및 불필요한 요소 제거한 Canonical URL 생성
+    canonical_url = urlunparse((parsed.scheme, netloc, parsed.path, parsed.params, clean_query, ''))
     
     return canonical_url
 
 def normalize_content(html_content: str) -> str:
     """
-    중복 판정을 위해 콘텐츠를 정규화합니다.
-    - HTML 태그 제거 및 소문자 변환 (해시용)
-    - 연속된 공백/줄바꿈 통합
-    - 시간 기반 노이즈 제거
+    의미론적 본문 비교를 위해 콘텐츠를 정규화합니다.
+    - HTML 태그 제거 및 소문자 변환
+    - 내비게이션, 푸터, 광고 영역 등 노이즈 제거
+    - 화이트스페이스 통합
     """
     if not html_content:
         return ""
         
-    # 1. HTML 태그 제거
-    text = re.sub(r'<[^>]+>', ' ', html_content)
+    # 1. 태그 내 텍스트 추출 전 불필요한 블록 제거 (스크립트, 스타일, 내비게이션 등)
+    # 실제 BS4를 쓰지 않는 경우 정규식으로 처리 (간결함 유지)
+    html_content = re.sub(r'<(script|style|nav|footer|header)[^>]*>.*?</\1>', ' ', html_content, flags=re.DOTALL | re.IGNORECASE)
     
-    # 2. 소문자 변환 (해싱용 정규화)
+    # 2. HTML 태그 제거
+    text = re.sub(r'<[^>]+>', ' ', html_content)
     text = text.lower()
     
-    # 3. 시간 관련 동적 노이즈 제거 패턴
+    # 3. 시간 및 소셜 기반 노이즈 제거 패턴 (광고/공유 버튼 등)
     noise_patterns = [
         r'\d+\s+(hours?|minutes?|days?|comments?)\s+ago',
         r'updated\s+\d+\s+hours?\s+ago',
-        r'just\s+now',
+        r'share\s+on\s+(facebook|twitter|linkedin|reddit)',
+        r'©\s*\d{4}.*',
+        r'all\s+rights\s+reserved',
         r'last\s+updated\s+at\s+[\d:]+'
     ]
     for pattern in noise_patterns:
-        text = re.sub(pattern, ' ', text)
+        text = re.sub(pattern, ' ', text, flags=re.IGNORECASE)
         
-    # 4. 화이트스페이스 정규화 (공백/줄바꿈 통합)
+    # 4. 화이트스페이스 정규화
     text = re.sub(r'\s+', ' ', text).strip()
     
     return text

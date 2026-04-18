@@ -15,62 +15,65 @@ def generate_markdown_archive(groups: List[Any], metrics: Dict[str, int] = None)
     """
     if not os.path.exists(DOCS_DIR):
         try:
-            os.makedirs(DOCS_DIR)
-            logger.info(f"Created directory: {DOCS_DIR}")
-        except Exception as e:
-            logger.error(f"Failed to create directory {DOCS_DIR}: {str(e)}")
-            return
-        
+def generate_markdown_archive(items: List[GroupedReportItem], metrics: Dict[str, Any] = None):
+    """
+    Generates a high-quality, topic-grouped markdown report.
+    - Groups items by Topic.
+    - Sorts topics and items by personalized scores.
+    - Visualizes [NEW]/[UPDATED] status.
+    """
     date_str = datetime.now().strftime("%Y-%m-%d")
-    file_path = os.path.join(DOCS_DIR, f"report_{date_str}.md")
+    os.makedirs(DOCS_DIR, exist_ok=True)
+    filename = os.path.join(DOCS_DIR, f"report_{date_str}.md")
+    
+    # 1. Group items by topic (Using the advanced logic in aggregator)
+    topic_groups = group_by_topic(items)
     
     try:
-        # Overwrite mode ('w') for a clean daily snapshot
-        with open(file_path, "w", encoding="utf-8") as f:
-            # Header and metrics are now written once per file creation
-            f.write(f"# IT Knowledge Ingestion Report - {date_str}\n\n")
+        with open(filename, "w", encoding="utf-8") as f:
+            # Header
+            f.write(f"# 🚀 IT Knowledge Digest - {date_str}\n\n")
             
             if metrics:
-                f.write("### 📊 Today's Pipeline Metrics\n")
+                f.write("### 📊 Pipeline Statistics\n")
                 f.write(f"- **Sources Processed:** {metrics.get('source_count', 0)}\n")
-                f.write(f"- **Total Items Extracted:** {metrics.get('item_extracted_count', 0)}\n")
-                f.write(f"- **Full-fetch Success:** {metrics.get('item_full_fetched_count', 0)}\n")
-                f.write(f"- **New/Updated (Saved):** {metrics.get('stored_new', 0) + metrics.get('stored_updated', 0)}\n")
-                f.write(f"- **Duplicates Skipped:** {metrics.get('item_duplicate_count', 0)}\n")
-                f.write(f"- **Low Quality/Parse Failed:** {metrics.get('item_low_quality_count', 0) + metrics.get('item_parse_failed_count', 0)}\n")
-                f.write(f"- **Summary Reused:** {metrics.get('reused_summary', 0)}\n\n")
+                f.write(f"- **Total Extracted:** {metrics.get('fetched', 0)}\n")
+                f.write(f"- **New Articles:** {metrics.get('stored_new', 0)}\n")
+                f.write(f"- **Updates Found:** {metrics.get('stored_updated', 0)}\n")
+                f.write(f"- **Noise Filtered:** {metrics.get('item_low_quality_count', 0)}\n\n")
                 f.write("---\n\n")
 
-            if not groups:
-                if metrics and metrics.get('fetched', 0) == 0:
-                    f.write("> ⚠️ **Status: Data Ingestion Failed.** No sources could be reached. Please check connectivity.\n\n")
-                else:
-                    f.write("> ✅ **Status: Current Snapshot is empty or all items filtered.**\n\n")
+            if not topic_groups:
+                f.write("> 📭 **오늘의 새로운 소식이 없습니다.** 내일을 기대해 주세요!\n")
                 return
 
-            for item in groups:
-                # Safe attribute extraction for both GroupedReportItem (object) and dict
-                if hasattr(item, 'title'):
-                    title = item.title
-                    summary = item.summary
-                    score = item.score
-                    reason = getattr(item, 'reason', '일반 기술 소식')
-                    urls = item.urls
-                else:
-                    title = item.get('title')
-                    summary = item.get('summary')
-                    score = item.get('score')
-                    reason = item.get('reason', '일반 기술 소식')
-                    urls = item.get('urls', [item.get('url')]) if item.get('urls') else ([item.get('url')] if item.get('url') else [])
+            # 2. Iterate through Topic Groups (Already sorted by Scorer priority)
+            total_items_count = sum(len(g) for g in topic_groups.values())
+            f.write(f"현재 총 **{total_items_count}건**의 선별된 기술 소식이 토픽별로 정리되어 있습니다.\n\n")
+
+            for topic, group in topic_groups.items():
+                f.write(f"## 📂 {topic}\n\n")
                 
-                f.write(f"## {title}\n")
-                f.write(f"- **Importance:** {score}/10 ({reason})\n")
-                f.write("- **Sources:**\n")
-                for url in urls:
-                    f.write(f"  - {url}\n")
-                f.write(f"- **Summary:** {summary}\n\n")
-        
-        logger.info(f"Successfully archived {len(groups)} items to {file_path}")
+                for item in group:
+                    status_emoji = "✨" if item.status == "NEW" else "🔄"
+                    score_pct = int(round(item.personalized_score))
+                    
+                    # Title with Status Tag
+                    f.write(f"### {status_emoji} [{item.status}] {item.title}\n")
+                    
+                    # Metadata
+                    f.write(f"- **Personalized Importance:** `{score_pct}%` ({item.reason})\n")
+                    f.write(f"- **Technical Score:** `{int(round(item.global_score))}%` | **Tags:** {', '.join(item.tags)}\n")
+                    f.write(f"- **Sources:**\n")
+                    for url in item.urls:
+                        f.write(f"  - [{urlparse(url).netloc}]({url})\n")
+                    
+                    # Summary
+                    f.write(f"\n> {item.summary}\n\n")
+                
+                f.write("---\n\n")
+
+        logger.info(f"Consolidated Topic-Grouped report generated: {filename}")
         
     except Exception as e:
         logger.error(f"Failed to write markdown archive: {str(e)}")
