@@ -172,15 +172,4 @@ def get_daily_summary(db_path, date_str):
         items.append(item)
         
     conn.close()
-    results = []
-    for row in rows:
-        item = dict(row)
-        # Convert comma-separated strings back to lists
-        if item.get('key_points'):
-            item['key_points'] = item['key_points'].split(", ")
-        if item.get('keywords'):
-            item['keywords'] = item['keywords'].split(", ")
-        results.append(item)
-        
-    conn.close()
-    return results
+    return items
