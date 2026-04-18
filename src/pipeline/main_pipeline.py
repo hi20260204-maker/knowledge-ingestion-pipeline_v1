@@ -1,249 +1,135 @@
+"""
+메인 파이프라인 오케스트레이터.
+
+소스 추출 → 보강 → 저장 → 요약 → 배포의 전체 파이프라인을 조율합니다.
+각 단계는 src.pipeline.steps 패키지의 개별 모듈로 분리되어 있습니다.
+"""
 import os
-import sys
-import logging
-import requests
-import time
-
-# Ensure src is in python path
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
-
-from typing import List, Dict, Any
 from src.config.parser import load_sources
-from src.extractor.fallback_engine import (
-    perform_extraction, engine_rss_itemized, engine_hn_listing, 
-    engine_reddit_listing, engine_rss_fallback, ExtractedItem
-)
-from src.processor.hasher import generate_url_hash, generate_content_hash, normalize_url, normalize_content
-from src.db.client import (
-    init_db, check_duplicate, save_article, save_summary, 
-    find_latest_article_id, find_reusable_summary, CURRENT_SUMMARY_VERSION
+from src.config.settings import DB_PATH, SCHEMA_PATH, SOURCES_PATH, INTERESTS_PATH
+from src.db.client import init_db, check_duplicate
+from src.processor.hasher import generate_url_hash, generate_content_hash, normalize_url
+from src.extractor.engines import (
+    engine_rss_itemized, engine_hn_listing,
+    engine_reddit_listing, engine_rss_fallback
 )
 from src.processor.scorer import Scorer
+from src.pipeline.metrics import PipelineMetrics
+from src.pipeline.steps.extract import process_source
+from src.pipeline.steps.enrich import enrich_item
+from src.pipeline.steps.store import store_item
+from src.pipeline.steps.summarize import summarize_item
+from src.pipeline.steps.distribute import distribute_results
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-DB_PATH = "knowledge.db"
-SCHEMA_PATH = os.path.join("src", "db", "schema.sql")
-QUALITY_THRESHOLD_CHARS = 200
-
-def should_full_fetch(item: ExtractedItem) -> bool:
-    """Decide whether to perform a secondary fetch for full content."""
-    blog_domains = [
-        "ai.meta.com", "blog.research.google", "techcrunch.com", 
-        "bytebytego.com", "developers.openai.com", "anthropic.com",
-        "github.blog", "nvidia.com", "theverge.com"
-    ]
-    if any(domain in item.url for domain in blog_domains):
-        return True
-    if not item.snippet or len(item.snippet) < 150:
-        return True
-    return False
 
 def run_pipeline():
-    metrics = {
-        'source_count': 0,
-        'item_extracted_count': 0,
-        'item_full_fetched_count': 0,
-        'item_duplicate_count': 0,
-        'item_low_quality_count': 0,
-        'item_parse_failed_count': 0,
-        'fetched': 0,
-        'stored_new': 0,
-        'stored_updated': 0,
-        'reused_summary': 0,
-        'errors': 0
-    }
-    
+    """전체 파이프라인을 실행합니다.
+
+    실행 흐름:
+    1. DB 초기화 (최초 실행 시)
+    2. 소스 목록 로드
+    3. 각 소스별로:
+       a. 아이템 추출
+       b. 예비 중복 검사 (불필요한 full-fetch 방지)
+       c. 아이템 보강 (full-fetch + 해싱)
+       d. 보강 후 중복 재검사 및 DB 저장
+       e. LLM 요약 및 스코어링
+    4. 실행 요약 로깅
+    5. 리포트 생성 및 Discord 알림 발송
+    """
+    metrics = PipelineMetrics()
+
+    # 1. DB 초기화 (최초 실행 시)
     if not os.path.exists(DB_PATH):
         logger.info("Initializing database...")
         init_db(DB_PATH, SCHEMA_PATH)
-    
-    sources = load_sources("sources.yaml")
-    metrics['source_count'] = len(sources)
+
+    # 2. 소스 로드
+    sources = load_sources(SOURCES_PATH)
+    metrics.source_count = len(sources)
     logger.info(f"Loaded {len(sources)} sources.")
-    
-    # Engines and Scorer ordered by specificity
+
+    # 3. 엔진 및 스코어러 설정
     extraction_engines = [
-        engine_rss_itemized, 
-        engine_hn_listing, 
-        engine_reddit_listing, 
+        engine_rss_itemized,
+        engine_hn_listing,
+        engine_reddit_listing,
         engine_rss_fallback
     ]
-    scorer = Scorer()
+    scorer = Scorer(INTERESTS_PATH)
 
-    # 3. Process Each Source
+    # 4. 소스별 처리
     for source in sources:
-        logger.info(f"Processing source: {source.id} ({source.url})")
-        extraction_result = perform_extraction(source.url, extraction_engines)
-        metrics['fetched'] += 1
-        
-        if not extraction_result.success:
-            logger.error(f"Failed to extract from {source.url}: {extraction_result.error}")
-            metrics['errors'] += 1
-            continue
-            
-        items = extraction_result.items
-        if not items and extraction_result.content:
-            items = [ExtractedItem(
-                title=extraction_result.title or f"Article from {source.id}",
-                url=extraction_result.url or source.url,
-                raw_content=extraction_result.content,
-                source_name=source.id,
-                source_type="legacy_fallback",
-                fetch_mode="full"
-            )]
-        
-        metrics['item_extracted_count'] += len(items)
+        items = process_source(source, extraction_engines, metrics)
 
         for item in items:
             try:
+                # 4a. URL 정규화 및 해시 생성
                 item.canonical_url = item.canonical_url or normalize_url(item.url)
                 url_hash = generate_url_hash(item.url)
-                
-                # Preliminary duplicate check to avoid unnecessary full-fetching
+
+                # 4b. 예비 중복 검사 (불필요한 full-fetch 방지)
                 initial_content = item.raw_content or item.snippet or ""
                 if check_duplicate(DB_PATH, url_hash, generate_content_hash(initial_content)):
-                    metrics['item_duplicate_count'] += 1
+                    metrics.item_duplicate_count += 1
                     continue
 
-                if item.fetch_mode == "snippet" and should_full_fetch(item):
-                    logger.info(f"Enriching item via full-fetch: {item.title}")
-                    try:
-                        time.sleep(0.5) # Simple rate limiting
-                        resp = requests.get(item.url, timeout=10, headers={"User-Agent": "Knowledge-Bot/1.0"})
-                        resp.raise_for_status()
-                        item.raw_content = resp.text[:20000]
-                        item.fetch_mode = "full"
-                        metrics['item_full_fetched_count'] += 1
-                    except Exception as fe:
-                        logger.warning(f"Full-fetch failed for {item.url}, using snippet: {fe}")
-                        metrics['item_parse_failed_count'] += 1
+                # 4c. 아이템 보강 (full-fetch + 최종 해시 생성)
+                content_hash, normalized_text = enrich_item(item, metrics)
 
-                final_content = item.raw_content or item.snippet or ""
-                normalized_text = normalize_content(final_content)
-                content_hash = generate_content_hash(final_content)
-                
+                # 4d. 보강 후 중복 재검사
                 if check_duplicate(DB_PATH, url_hash, content_hash):
-                    metrics['item_duplicate_count'] += 1
+                    metrics.item_duplicate_count += 1
                     continue
 
-                status = "NEW"
-                if len(normalized_text) < QUALITY_THRESHOLD_CHARS:
-                    status = "LOW_QUALITY"
-                    metrics['item_low_quality_count'] += 1
-                else:
-                    parent_id = find_latest_article_id(DB_PATH, url_hash)
-                    if parent_id:
-                        status = "UPDATED"
+                # 4e. 상태 판정 및 DB 저장
+                article_id, status = store_item(
+                    item, url_hash, content_hash, normalized_text,
+                    source.id, metrics
+                )
+                if article_id is None:
+                    continue
 
-                article_data = {
-                    'source_id': source.id,
-                    'raw_url': item.url,
-                    'canonical_url': item.canonical_url,
-                    'title': item.title,
-                    'url_hash': url_hash,
-                    'content_hash': content_hash,
-                    'raw_content': final_content,
-                    'status': status,
-                    'parent_id': parent_id if status == "UPDATED" else None
-                }
-                
-                article_id = save_article(DB_PATH, article_data)
-                if status == "NEW": metrics['stored_new'] += 1
-                elif status == "UPDATED": metrics['stored_updated'] += 1
-
+                # 4f. LLM 요약 및 스코어링 (NEW/UPDATED만)
                 if status in ["NEW", "UPDATED"]:
-                    summary_data = find_reusable_summary(DB_PATH, content_hash)
-                    if not summary_data:
-                        from src.llm.summarizer import summarize_content
-                        try:
-                            # 1. Extract Signals from LLM
-                            llm_signals = summarize_content(final_content, fetch_mode=item.fetch_mode)
-                            
-                            # 2. Logic-based Scoring
-                            metadata = {
-                                "source_weight": source.source_weight,
-                                "fetch_mode": item.fetch_mode
-                            }
-                            scoring_result = scorer.calculate_score(llm_signals.dict(), metadata)
-                            
-                            summary_data = {
-                                'global_score': scoring_result['global_score'],
-                                'personalized_score': scoring_result['personalized_score'],
-                                'reason': scoring_result['reason'],
-                                'summary': llm_signals.summary,
-                                'key_points': llm_signals.key_points,
-                                'keywords': llm_signals.topics # Mapping topics to keywords for DB
-                            }
-                        except Exception as e:
-                            logger.error(f"Summarization/Scoring failed for {item.url}: {e}")
-                            summary_data = {
-                                'global_score': 50.0,
-                                'personalized_score': 50.0,
-                                'reason': "Analysis error fallback",
-                                'summary': "Summary bypass (Error or API issue)",
-                                'key_points': [], 'keywords': ["General"]
-                            }
-                        
-                        save_summary(DB_PATH, article_id, summary_data)
-                        metrics['stored_new' if status == "NEW" else 'stored_updated'] += 1
-                    else:
-                        metrics['reused_summary'] += 1
-                    
+                    final_content = item.raw_content or item.snippet or ""
+                    summarize_item(
+                        article_id, item, final_content,
+                        scorer, source.source_weight, item.fetch_mode, metrics
+                    )
+
             except Exception as e:
                 logger.error(f"Error processing item {item.url}: {e}")
-                metrics['errors'] += 1
+                metrics.errors += 1
 
-    # 9. Final Report & Aggregation (Task 3 / Phase 1 Improvement)
-    logger.info("--- Pipeline Execution Summary ---")
-    for k, v in metrics.items():
-        logger.info(f"{k.replace('_', ' ').title()}: {v}")
-        
-    if metrics['stored_new'] == 0 and metrics['stored_updated'] == 0:
-        if metrics['fetched'] > 0:
-            logger.info("Pipeline completed successfully, but no new/updated data found (All duplicates or low quality).")
-        else:
-            logger.error("Pipeline finished with 0 fetches. Check connectivity or sources.yaml.")
+    # 5. 실행 요약 로깅
+    _log_summary(metrics)
 
-    # 10. Trigger Distribution (Phase 1: DB-driven snapshots)
-    from src.processor.aggregator import aggregate_items
-    from src.distribution.reporter import generate_markdown_archive
-    from datetime import datetime
-    from src.db.client import get_daily_summary
-    
-    # 10. Trigger Distribution (Phase 4: Multi-dimensional curation)
-    from src.processor.aggregator import aggregate_items
-    from src.distribution.reporter import generate_markdown_archive
-    from datetime import datetime
-    from src.db.client import get_daily_summary
-    
-    today_str = datetime.now().strftime("%Y-%m-%d")
-    logger.info(f"Generating high-intelligence report for: {today_str}")
-    
-    # Query the definitive unique set of today's items (with all Phase 4 scores)
-    latest_daily_items = get_daily_summary(DB_PATH, today_str)
-    
-    if latest_daily_items:
-        # Group similar items & Create Markdown (Topic-grouped)
-        grouped_items = aggregate_items(latest_daily_items)
-        generate_markdown_archive(grouped_items, metrics)
-        
-        # 11. Discord Notification (Phase 4 Final: G1 + P2 selection)
-        from src.distribution.discord_notifier import send_daily_digest
-        webhook_url = os.environ.get("DISCORD_WEBHOOK_URL")
-        if webhook_url:
-            logger.info("Sending Intelligent Daily Digest to Discord...")
-            send_daily_digest(webhook_url, today_str, latest_daily_items, metrics)
-    elif metrics['fetched'] > 0:
-        # Zero-data reporting
-        generate_markdown_archive([], metrics)
-        from src.distribution.discord_notifier import send_daily_digest
-        webhook_url = os.environ.get("DISCORD_WEBHOOK_URL")
-        if webhook_url:
-            send_daily_digest(webhook_url, today_str, [], metrics)
+    # 6. 리포트 생성 및 Discord 알림 발송
+    distribute_results(metrics)
 
     logger.info("Pipeline execution completed.")
+
+
+def _log_summary(metrics: PipelineMetrics):
+    """파이프라인 실행 요약을 로깅합니다.
+
+    Args:
+        metrics: 파이프라인 실행 메트릭
+    """
+    logger.info("--- Pipeline Execution Summary ---")
+    for k, v in metrics.to_dict().items():
+        logger.info(f"{k.replace('_', ' ').title()}: {v}")
+
+    if metrics.stored_new == 0 and metrics.stored_updated == 0:
+        if metrics.fetched > 0:
+            logger.info("Pipeline completed successfully, but no new/updated data found.")
+        else:
+            logger.error("Pipeline finished with 0 fetches. Check connectivity or sources config.")
+
 
 if __name__ == "__main__":
     run_pipeline()

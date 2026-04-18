@@ -35,7 +35,7 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: |
-          python src/pipeline/main_pipeline.py
+          python run.py
           
       - name: Commit and Push DB & Markdown Archives
         run: |

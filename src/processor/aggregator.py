@@ -1,42 +1,32 @@
-from typing import List, Dict, Any, Optional
+"""
+아이템 집계 및 그룹화 모듈.
 
-class GroupedReportItem:
-    def __init__(self, content_hash: str, title: str, summary: str, 
-                 global_score: float, personalized_score: float, 
-                 reason: str, topic: str, tags: List[str], status: str):
-        self.content_hash = content_hash
-        self.title = title
-        self.summary = summary
-        self.global_score = global_score
-        self.personalized_score = personalized_score
-        self.reason = reason
-        self.topic = topic
-        self.tags = tags
-        self.status = status # NEW, UPDATED
-        self.urls = []
+DB에서 조회된 아이템을 콘텐츠 해시 기반으로 중복 제거하고,
+토픽별로 그룹화하여 리포트 생성에 사용합니다.
+"""
+from typing import List, Dict, Any
+from src.models import GroupedReportItem
 
-    def add_url(self, url: str):
-        if url not in self.urls:
-            self.urls.append(url)
 
 def aggregate_items(items: List[Dict[str, Any]]) -> List[GroupedReportItem]:
-    """
-    Deduplicates and enriches items. Maps DB status to report status.
-    Filters out REPEAT items implicitly by only processing items passed from the pipeline.
+    """DB 아이템 목록을 콘텐츠 해시 기반으로 중복 제거하고 GroupedReportItem으로 변환합니다.
+
+    동일 content_hash를 가진 아이템은 하나로 합쳐지고,
+    다수의 URL이 하나의 GroupedReportItem에 모입니다.
+
+    Args:
+        items: DB에서 조회된 아이템 딕셔너리 목록
+
+    Returns:
+        중복 제거된 GroupedReportItem 목록
     """
     groups: Dict[str, GroupedReportItem] = {}
-    
+
     for item in items:
         c_hash = item['content_hash']
         if c_hash not in groups:
-            # Map DB status to UI tags
-            status_tag = "NEW"
-            if item.get('status') == "UPDATED":
-                status_tag = "UPDATED"
-            elif item.get('status') == "SUMMARY_REUSED":
-                # If content is same but it was triggered, it's usually REPEAT. 
-                # But here we assume pipeline handles filtering, so we mark as NEW if it reached here.
-                status_tag = "NEW"
+            # DB 상태를 리포트 상태 태그로 매핑
+            status_tag = _map_status(item.get('status', 'NEW'))
 
             groups[c_hash] = GroupedReportItem(
                 content_hash=c_hash,
@@ -50,32 +40,54 @@ def aggregate_items(items: List[Dict[str, Any]]) -> List[GroupedReportItem]:
                 status=status_tag
             )
         groups[c_hash].add_url(item['url'])
-        
+
     return list(groups.values())
 
-def group_by_topic(items: List[GroupedReportItem]) -> Dict[str, List[GroupedReportItem]]:
+
+def _map_status(db_status: str) -> str:
+    """DB 상태 값을 리포트 상태 태그로 매핑합니다.
+
+    Args:
+        db_status: DB의 status 필드 값
+
+    Returns:
+        리포트용 상태 태그 ("NEW" 또는 "UPDATED")
     """
-    Groups items by topic and sorts them hierarchically.
-    1. Topics are sorted by the highest personalized_score item within them.
-    2. Items within topics are sorted by personalized_score DESC, then global_score DESC.
+    if db_status == "UPDATED":
+        return "UPDATED"
+    return "NEW"
+
+
+def group_by_topic(items: List[GroupedReportItem]) -> Dict[str, List[GroupedReportItem]]:
+    """아이템을 토픽별로 그룹화하고 점수 기준 계층적 정렬을 수행합니다.
+
+    정렬 기준:
+    1. 토픽 간: 해당 토픽의 최고 personalized_score 기준 내림차순
+    2. 토픽 내: personalized_score → global_score 기준 내림차순
+
+    Args:
+        items: 그룹화할 GroupedReportItem 목록
+
+    Returns:
+        토픽명을 키로 하는 정렬된 딕셔너리
     """
     topic_groups: Dict[str, List[GroupedReportItem]] = {}
-    
+
     for item in items:
         topic = item.topic
         if topic not in topic_groups:
             topic_groups[topic] = []
         topic_groups[topic].append(item)
-        
-    # Sort items within each topic
+
+    # 토픽 내 아이템 정렬
     for topic in topic_groups:
         topic_groups[topic].sort(key=lambda x: (x.personalized_score, x.global_score), reverse=True)
-        
-    # Sort the dictionary (topics) by the max personalized score of its best item
+
+    # 토픽 간 정렬 (최고 personalized_score 기준)
     sorted_topics = sorted(
-        topic_groups.items(), 
-        key=lambda x: max(item.personalized_score for item in x[1]), 
+        topic_groups.items(),
+        key=lambda x: max(item.personalized_score for item in x[1]),
         reverse=True
     )
-    
+
     return dict(sorted_topics)
