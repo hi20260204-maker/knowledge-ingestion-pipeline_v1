@@ -107,11 +107,11 @@ def save_summary(db_path, article_id, summary_data):
 
     cursor.execute("""
         INSERT INTO summaries (
-            article_id, summary, key_points, keywords, 
+            article_id, summary_text, key_points, keywords, 
             importance_score, global_score, personalized_score, reason
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(article_id) DO UPDATE SET
-            summary=excluded.summary,
+            summary_text=excluded.summary_text,
             key_points=excluded.key_points,
             keywords=excluded.keywords,
             importance_score=excluded.importance_score,
@@ -123,7 +123,7 @@ def save_summary(db_path, article_id, summary_data):
         summary_data['summary'], 
         json.dumps(summary_data['key_points']), 
         json.dumps(summary_data['keywords']),
-        int(round(g_score/10.0)) if g_score > 10 else int(g_score), # Backward compatibility for old 1-10 range
+        int(round(g_score/10.0)) if g_score > 10 else int(g_score),
         g_score,
         p_score,
         reason
@@ -142,7 +142,7 @@ def get_daily_summary(db_path, date_str):
     cursor = conn.cursor()
     
     cursor.execute("""
-        SELECT a.*, s.summary, s.key_points, s.keywords, 
+        SELECT a.*, s.summary_text as summary, s.key_points, s.keywords, 
                s.global_score, s.personalized_score, s.reason
         FROM articles a
         JOIN summaries s ON a.id = s.article_id
