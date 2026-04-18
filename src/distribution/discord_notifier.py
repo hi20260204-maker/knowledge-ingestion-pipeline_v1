@@ -1,42 +1,49 @@
 import requests
 import logging
-from typing import List
+from typing import List, Dict, Any
 
 logger = logging.getLogger(__name__)
 
-def send_discord_notification(webhook_url: str, title: str, summary: str, url: str, score: int, keywords: List[str]) -> bool:
+def send_daily_digest(webhook_url: str, date_str: str, articles: List[Dict[str, Any]], metrics: Dict[str, Any]) -> bool:
     """
-    Sends a Rich Embed card to a Discord Webhook.
+    Sends a consolidated summary of the daily ingestion to Discord.
+    Highlights Top 3 articles.
     """
     if not webhook_url:
-        logger.error("Failed to send notification: Webhook URL is missing.")
-        raise ValueError("Discord Webhook URL is missing")
+        logger.warning("Discord Webhook URL missing. Skipping digest notification.")
+        return False
+        
+    top_articles = sorted(articles, key=lambda x: x.get('score', 0), reverse=True)[:3]
+    
+    fields = []
+    for art in top_articles:
+        fields.append({
+            "name": f"⭐ [{art.get('score')}/10] {art.get('title')}",
+            "value": f"[Read Article]({art.get('url')})\n{art.get('summary')[:150]}...",
+            "inline": False
+        })
         
     embed = {
-        "title": title,
-        "url": url,
-        "color": 3447003, # Blueish tint
-        "description": f"**Importance Score: {score}/10**\n\n{summary}\n\n**Keywords:** {' '.join(keywords)}",
+        "title": f"🚀 Daily IT Knowledge Digest - {date_str}",
+        "color": 15158332, # Red-ish/Orange
+        "description": (
+            f"**Pipeline Execution Completed!**\n"
+            f"📊 Total Fetched: {metrics.get('fetched', 0)}\n"
+            f"🆕 New/Updated: {metrics.get('stored_new', 0) + metrics.get('stored_updated', 0)}\n"
+            f"♻️ Reused: {metrics.get('reused_summary', 0)}\n\n"
+            f"--- **Top 3 Highlights** ---"
+        ),
+        "fields": fields,
         "footer": {
-            "text": "IT Knowledge Ingestion Pipeline"
+            "text": "IT Knowledge Ingestion Pipeline | Powered by Antigravity AI"
         }
     }
     
-    payload = {
-        "embeds": [embed]
-    }
+    payload = {"embeds": [embed]}
     
     try:
-        logger.info(f"Dispatching Discord notification for '{title}'")
         response = requests.post(webhook_url, json=payload, timeout=10)
-        
-        if response.status_code in [200, 204]:
-            logger.info("Discord notification sent successfully.")
-            return True
-        else:
-            logger.error(f"Discord API returned status {response.status_code}: {response.text}")
-            return False
-            
+        return response.status_code in [200, 204]
     except Exception as e:
-        logger.error(f"Failed to post to Discord webhook: {str(e)}")
+        logger.error(f"Failed to send Daily Digest: {e}")
         return False

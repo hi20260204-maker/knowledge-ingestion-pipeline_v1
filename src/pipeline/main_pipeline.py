@@ -217,9 +217,22 @@ def run_pipeline():
         # Group similar items by content_hash (Still useful for multi-source content)
         grouped_items = aggregate_items(latest_daily_items)
         generate_markdown_archive(grouped_items, metrics)
+        
+        # 11. Discord Notification (Phase 3 Final Verification)
+        from src.distribution.discord_notifier import send_daily_digest
+        webhook_url = os.environ.get("DISCORD_WEBHOOK_URL")
+        if webhook_url:
+            logger.info("Sending Daily Digest to Discord...")
+            send_daily_digest(webhook_url, today_str, latest_daily_items, metrics)
     elif metrics['fetched'] > 0:
         # Zero-data reporting (Passing metrics even when 0 items, to show status)
         generate_markdown_archive([], metrics)
+        
+        # Send a minimal notification to show pipeline is alive
+        from src.distribution.discord_notifier import send_daily_digest
+        webhook_url = os.environ.get("DISCORD_WEBHOOK_URL")
+        if webhook_url:
+            send_daily_digest(webhook_url, today_str, [], metrics)
 
     logger.info("Pipeline execution completed.")
 
